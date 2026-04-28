@@ -17,10 +17,19 @@
 package com.google.appinventor.client;
 
 import com.google.appinventor.client.editor.FileEditor;
+import com.google.appinventor.client.editor.blocks.BlocksEditor;
 import com.google.appinventor.client.editor.designer.DesignerEditor;
 import com.google.appinventor.client.editor.simple.SimpleComponentDatabase;
 import com.google.appinventor.client.editor.simple.components.MockComponent;
+import com.google.appinventor.client.explorer.project.Project;
 import com.google.appinventor.client.youngandroid.TextValidators;
+import com.google.appinventor.shared.properties.json.JSONUtil;
+import com.google.appinventor.shared.rpc.project.ProjectNode;
+import com.google.appinventor.shared.rpc.project.ProjectRootNode;
+import com.google.appinventor.shared.rpc.project.youngandroid.YoungAndroidAssetNode;
+import com.google.appinventor.shared.rpc.project.youngandroid.YoungAndroidAssetsFolder;
+import com.google.appinventor.shared.rpc.project.youngandroid.YoungAndroidBlocksNode;
+import com.google.appinventor.shared.rpc.project.youngandroid.YoungAndroidProjectNode;
 
 /**
  * JSNI bridge that exposes designer component operations
@@ -133,6 +142,183 @@ public final class ComponentEditor {
     }
   }
 
+  // ─── Read APIs (Phase 5) ──────────────────────────────────────────────
+  // Each returns a JSON string. Lists return "[]" on failure (no project,
+  // wrong editor, etc.) rather than throwing — JS callers can treat empty
+  // arrays as the universal "nothing here" response. Single values return
+  // "null" (the JSON literal) for missing data.
+
+  /** Returns JSON array of {name, type} for every component on the active screen. */
+  public static String getComponents() {
+    try {
+      FileEditor editor = Ode.getInstance().getCurrentFileEditor();
+      if (!(editor instanceof DesignerEditor)) {
+        return "[]";
+      }
+      DesignerEditor<?, ?, ?, ?, ?> designerEditor = (DesignerEditor<?, ?, ?, ?, ?>) editor;
+      StringBuilder sb = new StringBuilder("[");
+      String sep = "";
+      for (MockComponent comp : designerEditor.getComponents().values()) {
+        sb.append(sep).append("{")
+          .append("\"name\":").append(JSONUtil.toJson(comp.getName()))
+          .append(",\"type\":").append(JSONUtil.toJson(comp.getType()))
+          .append("}");
+        sep = ",";
+      }
+      sb.append("]");
+      return sb.toString();
+    } catch (Exception e) {
+      return "[]";
+    }
+  }
+
+  /**
+   * Reads a single property value as a JSON string. Returns the JSON literal
+   * "null" if the component or property doesn't exist. Numeric/boolean values
+   * are still wrapped as JSON strings — App Inventor stores all property
+   * values as strings internally and lets the property editor coerce.
+   */
+  public static String getComponentProperty(String componentName, String propertyName) {
+    try {
+      if (propertyName == null) {
+        return "null";
+      }
+      MockComponent comp = findComponent(componentName);
+      if (comp == null || !comp.hasProperty(propertyName)) {
+        return "null";
+      }
+      String value = comp.getPropertyValue(propertyName);
+      return value == null ? "null" : JSONUtil.toJson(value);
+    } catch (Exception e) {
+      return "null";
+    }
+  }
+
+  /** Returns JSON array of screen names ("Screen1", "Screen2", ...). */
+  public static String listScreens() {
+    try {
+      FileEditor editor = Ode.getInstance().getCurrentFileEditor();
+      if (editor == null) {
+        return "[]";
+      }
+      ProjectRootNode root = editor.getProjectRootNode();
+      if (root == null) {
+        return "[]";
+      }
+      StringBuilder sb = new StringBuilder("[");
+      String sep = "";
+      for (ProjectNode child : root.getAllSourceNodes()) {
+        if (child instanceof YoungAndroidBlocksNode) {
+          // YoungAndroidBlocksNode has a getFormName() that strips the
+          // ".bky" suffix — preferred over getName() which keeps it.
+          YoungAndroidBlocksNode blocksNode = (YoungAndroidBlocksNode) child;
+          String name = blocksNode.getFormName();
+          if (name != null) {
+            sb.append(sep).append(JSONUtil.toJson(name));
+            sep = ",";
+          }
+        }
+      }
+      sb.append("]");
+      return sb.toString();
+    } catch (Exception e) {
+      return "[]";
+    }
+  }
+
+  /** Returns JSON array of asset filenames ("kitty.png", "music.mp3", ...). */
+  public static String listAssets() {
+    try {
+      YoungAndroidAssetsFolder assetsFolder = getAssetsFolder();
+      if (assetsFolder == null) {
+        return "[]";
+      }
+      StringBuilder sb = new StringBuilder("[");
+      String sep = "";
+      for (ProjectNode asset : assetsFolder.getChildren()) {
+        // asset.getName() returns the bare filename (no path prefix).
+        String name = asset.getName();
+        if (name != null) {
+          sb.append(sep).append(JSONUtil.toJson(name));
+          sep = ",";
+        }
+      }
+      sb.append("]");
+      return sb.toString();
+    } catch (Exception e) {
+      return "[]";
+    }
+  }
+
+  /**
+   * Returns the persisted Blockly XML for the *current* blocks editor (or "" if
+   * the user is in designer view or no project is open). Per-screen reads
+   * would require switching the active editor, which we avoid here — embedders
+   * who need a different screen's blocks should call switchScreen first.
+   */
+  public static String getBlocksXml() {
+    try {
+      FileEditor editor = Ode.getInstance().getCurrentFileEditor();
+      if (!(editor instanceof BlocksEditor)) {
+        // Maybe user is in designer; the matching blocks editor for the
+        // current screen is reachable via getCurrentFileEditor()'s sibling.
+        // For Phase 5 we return empty rather than synthesizing — the embedder
+        // can switchScreen / switchToBlocks first.
+        return "";
+      }
+      BlocksEditor<?, ?> blocksEditor = (BlocksEditor<?, ?>) editor;
+      String content = blocksEditor.getRawFileContent();
+      return content == null ? "" : content;
+    } catch (Exception e) {
+      return "";
+    }
+  }
+
+  /** Removes an asset by filename. Returns true on success, false if not found. */
+  public static boolean deleteAsset(String filename) {
+    try {
+      if (filename == null || filename.isEmpty()) {
+        return false;
+      }
+      YoungAndroidAssetsFolder assetsFolder = getAssetsFolder();
+      if (assetsFolder == null) {
+        return false;
+      }
+      Project project = Ode.getInstance().getProjectManager()
+          .getProject(Ode.getInstance().getCurrentYoungAndroidProjectId());
+      if (project == null) {
+        return false;
+      }
+      for (ProjectNode asset : assetsFolder.getChildren()) {
+        if (filename.equals(asset.getName()) && asset instanceof YoungAndroidAssetNode) {
+          project.deleteNode(asset);
+          return true;
+        }
+      }
+      return false; // no matching asset
+    } catch (Exception e) {
+      return false;
+    }
+  }
+
+  // ─── Internal helpers ─────────────────────────────────────────────────
+
+  private static YoungAndroidAssetsFolder getAssetsFolder() {
+    long projectId = Ode.getInstance().getCurrentYoungAndroidProjectId();
+    if (projectId == 0) {
+      return null;
+    }
+    Project project = Ode.getInstance().getProjectManager().getProject(projectId);
+    if (project == null) {
+      return null;
+    }
+    ProjectRootNode root = project.getRootNode();
+    if (!(root instanceof YoungAndroidProjectNode)) {
+      return null;
+    }
+    return ((YoungAndroidProjectNode) root).getAssetsFolder();
+  }
+
   // ─── JSNI export ──────────────────────────────────────────────────────
 
   private static native void exportMethodsToJavascript() /*-{
@@ -142,5 +328,17 @@ public final class ComponentEditor {
       $entry(@com.google.appinventor.client.ComponentEditor::renameComponent(Ljava/lang/String;Ljava/lang/String;));
     $wnd.ComponentEditor_setComponentProperty =
       $entry(@com.google.appinventor.client.ComponentEditor::setComponentProperty(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;));
+    $wnd.ComponentEditor_getComponents =
+      $entry(@com.google.appinventor.client.ComponentEditor::getComponents());
+    $wnd.ComponentEditor_getComponentProperty =
+      $entry(@com.google.appinventor.client.ComponentEditor::getComponentProperty(Ljava/lang/String;Ljava/lang/String;));
+    $wnd.ComponentEditor_listScreens =
+      $entry(@com.google.appinventor.client.ComponentEditor::listScreens());
+    $wnd.ComponentEditor_listAssets =
+      $entry(@com.google.appinventor.client.ComponentEditor::listAssets());
+    $wnd.ComponentEditor_getBlocksXml =
+      $entry(@com.google.appinventor.client.ComponentEditor::getBlocksXml());
+    $wnd.ComponentEditor_deleteAsset =
+      $entry(@com.google.appinventor.client.ComponentEditor::deleteAsset(Ljava/lang/String;));
   }-*/;
 }

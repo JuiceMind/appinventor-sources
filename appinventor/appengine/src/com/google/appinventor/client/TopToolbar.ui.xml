@@ -77,11 +77,20 @@
       <ai:DropDownItem name="Wireless" caption="{messages.AICompanionMenuItem}">
         <yaactions:WirelessAction/>
       </ai:DropDownItem>
+      <!-- [JuiceMind] Emulator and USB are hidden by default in our embedded
+           distribution: both modes shell out to aiStarter on http://localhost:8004
+           (start/, echeck/, ucheck/, replstart/, etc.) and we don't ship aiStarter
+           in our Docker stack. Wireless via the rendezvous server is the supported
+           live-testing path. Re-enabling these would require setting up aiStarter
+           on the host AND wiring the buildserver/playground containers to access
+           that port (host networking) — not impossible but out of scope. -->
       <ai:DropDownItem name="Emulator" caption="{messages.emulatorMenuItem}"
+                       visible="false"
                        dependentStyleName="needsAiStarter">
         <yaactions:EmulatorAction/>
       </ai:DropDownItem>
       <ai:DropDownItem name="Usb" caption="{messages.usbMenuItem}"
+                       visible="false"
                        dependentStyleName="needsAiStarter">
         <yaactions:UsbAction/>
       </ai:DropDownItem>

@@ -1738,7 +1738,20 @@ public class YaVersion {
   public static final String COMPANION_UPDATE_URL = "";
   public static final String COMPANION_UPDATE_URL1 = "";
   public static final String COMPANION_UPDATE_EMULATOR_URL = "";
-  public static final String [] ACCEPTABLE_COMPANIONS = { "2.78", "2.78u" };
+  // Widened from the MIT default { "2.78", "2.78u" } so that newer Play-Store
+  // Companion releases (which roll out faster than upstream App Inventor cuts
+  // their version constants) connect without the "Companion Version Check"
+  // popup. The bridge also installs a permissive runtime override (see
+  // installPermissiveCompanionVersionCheck in bridge.js) — this list is the
+  // canonical fix that survives full rebuilds.
+  public static final String [] ACCEPTABLE_COMPANIONS = {
+      "2.78", "2.78u",
+      "2.79", "2.79u",
+      "2.80", "2.80u",
+      "2.81", "2.81u",
+      "2.82", "2.82u",
+      "2.83", "2.83u",
+  };
 
   // Splash Screen Values
   public static final int SPLASH_SURVEY = 1;

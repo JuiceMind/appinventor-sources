@@ -1021,12 +1021,15 @@ Blockly.ReplMgr.acceptablePackage = function(comppack) {
 };
 
 Blockly.ReplMgr.acceptableVersion = function(version) {
-    for (var i = 0; i < top.ACCEPTABLE_COMPANIONS.length; i++) {
-        if (top.ACCEPTABLE_COMPANIONS[i] == version) {
-            return true;
-        }
-    }
-    return false;
+    // [JuiceMind] In our embedded App Inventor distribution we don't gate the
+    // connection on Companion version equality. MIT's strict check rejects any
+    // version not enumerated in YaVersion.ACCEPTABLE_COMPANIONS, which gets
+    // stale quickly when the Play-Store Companion ships ahead of an upstream
+    // release. We trust the companion the user has installed and accept any
+    // non-empty version string. (YaVersion.ACCEPTABLE_COMPANIONS is also
+    // widened, but this is the canonical bypass.)
+    console.log('[JuiceMind] acceptableVersion("' + version + '") → permissive (replmgr.js source fix active)');
+    return typeof version === 'string' && version.length > 0;
 };
 
 Blockly.ReplMgr.processRetvals = function(responses) {
@@ -1960,16 +1963,15 @@ Blockly.ReplMgr.putAsset = function(projectid, filename, blob, success, fail, fo
 Blockly.ReplMgr.hardreset = function(formName, callback) {
     top.AssetManager_reset(formName); // Reset the notion of what assets
                                                 // are loaded.
-    var xhr = new XMLHttpRequest();
-    xhr.open("GET", "http://localhost:8004/reset/", true);
-    xhr.onreadystatechange = function() {
-        if (this.readyState == 4) {
-            if (callback) {     // Always call the callback
-                callback(this.status);
-            }
-        }
-    };
-    xhr.send();
+    // [JuiceMind] Skip the GET http://localhost:8004/reset/ that the upstream
+    // version performs. That endpoint is the aiStarter desktop helper used to
+    // reset the local Android emulator — our embedded distribution never ships
+    // aiStarter, so the call always fails with ERR_CONNECTION_REFUSED. The
+    // wireless reset is fully effected by the time hardreset() runs (WebRTC
+    // #DONE# was sent and YAIL was cleared in startRepl's else-branch).
+    if (callback) {
+        callback(0);
+    }
 };
 
 // ehardreset -- Reset connections and then tell aiStarter to
@@ -1981,12 +1983,12 @@ Blockly.ReplMgr.ehardreset = function(formName) {
     var dialog = new Blockly.Util.Dialog(Blockly.Msg.REPL_DO_YOU_REALLY_Q, Blockly.Msg.REPL_FACTORY_RESET, Blockly.Msg.REPL_RESET, true, Blockly.Msg.REPL_CANCEL, 0, function(response) {
         dialog.hide();
         if (response == Blockly.Msg.REPL_RESET) {
-            context.hardreset(formName, function() {
-                var xhr = new XMLHttpRequest();
-                xhr.open("GET", "http://localhost:8004/emulatorreset/", true);
-                xhr.onreadystatchange = function() {}; // Ignore errors
-                xhr.send();
-            });
+            // [JuiceMind] Skip the second XHR (GET http://localhost:8004/emulatorreset/)
+            // that the upstream version chained after hardreset(). That endpoint
+            // tells aiStarter to factory-reset the emulator process — and we
+            // don't run aiStarter. hardreset() above already does the
+            // user-visible work (WebRTC #DONE# and AssetManager reset).
+            context.hardreset(formName);
         }
     });
 };

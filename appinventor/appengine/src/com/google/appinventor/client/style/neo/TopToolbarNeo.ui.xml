@@ -60,10 +60,17 @@
       <ai:DropDownItem name="Wireless" caption="{messages.AICompanionMenuItem}">
         <yaactions:WirelessAction/>
       </ai:DropDownItem>
-      <ai:DropDownItem name="Emulator" caption="{messages.emulatorMenuItem}">
+      <!-- [JuiceMind] Emulator and USB are hidden in our embedded distribution:
+           both modes shell out to aiStarter on http://localhost:8004 (start/,
+           echeck/, ucheck/, replstart/, etc.) and we don't ship aiStarter in
+           our Docker stack. Wireless via the rendezvous server is the supported
+           live-testing path. -->
+      <ai:DropDownItem name="Emulator" caption="{messages.emulatorMenuItem}"
+                       visible="false">
         <yaactions:EmulatorAction/>
       </ai:DropDownItem>
-      <ai:DropDownItem name="Usb" caption="{messages.usbMenuItem}">
+      <ai:DropDownItem name="Usb" caption="{messages.usbMenuItem}"
+                       visible="false">
         <yaactions:UsbAction/>
       </ai:DropDownItem>
       <ai:DropDownItem name="Chromebook" caption="{messages.chromebookMenuItem}"
