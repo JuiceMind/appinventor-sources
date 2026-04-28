@@ -856,7 +856,14 @@ public final class YoungAndroidProjectService extends CommonProjectService {
         return appengineHost.get();
       }
     } else {
-      // TODO(user): Figure out how to make this more generic
+      // In dev mode the buildserver POSTs the build result back to this URL.
+      // In a multi-container Docker setup, "localhost" inside the buildserver
+      // resolves to the buildserver itself, so the appengine.host flag must
+      // win when set (e.g. "appengine:8888"). Fall back to localhost for
+      // single-host native dev.
+      if (!StringUtils.isNullOrEmpty(appengineHost.get())) {
+        return appengineHost.get();
+      }
       return "localhost:8888";
     }
   }
