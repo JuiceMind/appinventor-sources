@@ -204,6 +204,11 @@ public class Ode implements EntryPoint {
   private FileEditor currentFileEditor;
 
   private AssetManager assetManager = AssetManager.getInstance();
+  // Same pattern as assetManager: instantiating the singleton triggers the
+  // JSNI export so window.ComponentEditor_* is available to the postMessage
+  // bridge as soon as GWT loads.
+  @SuppressWarnings("unused")
+  private ComponentEditor componentEditor = ComponentEditor.getInstance();
   private boolean isAnon = false;
   private boolean displayedCodes = false; // True means we have displayed the dialog box
                                           // with the four word codes for an anonymous account

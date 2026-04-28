@@ -79,7 +79,29 @@ public final class ProjectBuilder {
   private static final int MAX_COMPILER_MESSAGE_LENGTH = 160;
   private static final String SEPARATOR = File.separator;
 
-  private static final int MAX_BUILD_TIMEOUT_SECONDS = 60 * 5; // 5 minutes
+  // Per-build timeout. The MIT default of 5 minutes is fine for a buildserver
+  // running native on x86_64, but Apple Silicon dev environments emulate amd64
+  // via Rosetta and a cold first build (empty /var/cache/dex) can take 8–12
+  // minutes. Make this overridable via the BUILD_TIMEOUT_SECONDS env var so
+  // local dev can raise it without recompiling. Default 20 minutes — plenty
+  // for cold caches on emulation, harmless on native hosts (it's a ceiling).
+  private static final int MAX_BUILD_TIMEOUT_SECONDS = readBuildTimeoutSeconds();
+
+  private static int readBuildTimeoutSeconds() {
+    String env = System.getenv("BUILD_TIMEOUT_SECONDS");
+    if (env != null && !env.isEmpty()) {
+      try {
+        int seconds = Integer.parseInt(env.trim());
+        if (seconds > 0) {
+          LOG.info("Using BUILD_TIMEOUT_SECONDS=" + seconds + " from environment");
+          return seconds;
+        }
+      } catch (NumberFormatException e) {
+        LOG.warning("Invalid BUILD_TIMEOUT_SECONDS=\"" + env + "\" — falling back to default");
+      }
+    }
+    return 60 * 20; // 20 minutes
+  }
 
   // Project folder prefixes
   // TODO(user): These constants are (or should be) also defined in
