@@ -9,6 +9,13 @@ import com.google.appinventor.client.editor.FileEditor;
 import com.google.appinventor.client.editor.designer.DesignerEditor;
 import com.google.appinventor.client.editor.simple.palette.AbstractPalettePanel;
 import com.google.appinventor.client.editor.simple.palette.SimplePaletteItem;
+import com.google.appinventor.client.editor.youngandroid.YaProjectEditor;
+import com.google.appinventor.client.explorer.project.Project;
+import com.google.appinventor.shared.rpc.component.ComponentImportResponse;
+import com.google.appinventor.shared.rpc.project.ProjectNode;
+import com.google.appinventor.shared.rpc.project.youngandroid.YoungAndroidAssetsFolder;
+import com.google.appinventor.shared.rpc.project.youngandroid.YoungAndroidComponentsFolder;
+import com.google.appinventor.shared.rpc.project.youngandroid.YoungAndroidProjectNode;
 import com.google.gwt.core.client.JsArrayString;
 import com.google.gwt.user.client.rpc.AsyncCallback;
 import java.util.HashSet;
@@ -56,7 +63,91 @@ public final class BridgeExports {
     $wnd.aiClearPaletteFilter = function () {
       return @com.google.appinventor.client.BridgeExports::clearPaletteFilter()();
     };
+    $wnd.aiImportExtension = function (uploadInfo, onDone) {
+      @com.google.appinventor.client.BridgeExports::importExtension(Ljava/lang/String;Lcom/google/gwt/core/client/JavaScriptObject;)(String(uploadInfo), onDone || null);
+    };
   }-*/;
+
+  /**
+   * Two-step extension import:
+   *   1. Embedder uploads the .aix to /ode/upload/component/<filename>
+   *      via HTTP (multipart form, field name 'uploadComponentArchive')
+   *      and receives an upload info string from the UploadResponse.
+   *   2. Embedder calls this with the upload info; we ask ComponentService
+   *      to actually install the component into the current project's
+   *      assets folder.
+   *
+   * Why split: step 1 is a plain HTTP POST the bridge can do in JS via
+   * fetch + FormData; step 2 is a GWT-RPC call that needs the typed
+   * service stubs only available from Java.
+   */
+  public static void importExtension(String uploadInfo, final com.google.gwt.core.client.JavaScriptObject onDone) {
+    if (uploadInfo == null || uploadInfo.isEmpty()) {
+      invokeDone(onDone, "uploadInfo required (the response.info field from the upload step)", null);
+      return;
+    }
+    final long projectId = Ode.getInstance().getCurrentYoungAndroidProjectId();
+    if (projectId == 0) {
+      invokeDone(onDone, "No project currently open", null);
+      return;
+    }
+    Project project = Ode.getInstance().getProjectManager().getProject(projectId);
+    if (project == null || !(project.getRootNode() instanceof YoungAndroidProjectNode)) {
+      invokeDone(onDone, "Active project is not a Young Android project", null);
+      return;
+    }
+    YoungAndroidAssetsFolder assets = ((YoungAndroidProjectNode) project.getRootNode()).getAssetsFolder();
+    Ode.getInstance().getComponentService().importComponentToProject(
+        uploadInfo, projectId, assets.getFileId(),
+        new AsyncCallback<ComponentImportResponse>() {
+          @Override public void onSuccess(ComponentImportResponse resp) {
+            // ComponentImportResponse.Status: IMPORTED is the regular
+            // success case; UPGRADED means we replaced an existing version.
+            // Anything else (UNKNOWN_URL, FAILED, …) is a hard error.
+            String status = resp == null ? "UNKNOWN" : String.valueOf(resp.getStatus());
+            boolean ok = "IMPORTED".equals(status) || "UPGRADED".equals(status);
+            if (!ok) {
+              invokeDone(onDone, "Import returned status " + status, null);
+              return;
+            }
+            // Server side stored the .aix; the project editor still needs
+            // to learn about the new component nodes and register the
+            // extension's palette items + block drawers. Mirrors what
+            // ComponentImportWizard.ImportComponentCallback.onSuccess does.
+            try {
+              long destinationProjectId = resp.getProjectId();
+              long currentProjectId = Ode.getInstance().getCurrentYoungAndroidProjectId();
+              if (currentProjectId == destinationProjectId) {
+                Project project = Ode.getInstance().getProjectManager().getProject(destinationProjectId);
+                if (project != null && project.getRootNode() instanceof YoungAndroidProjectNode) {
+                  YoungAndroidComponentsFolder componentsFolder =
+                      ((YoungAndroidProjectNode) project.getRootNode()).getComponentsFolder();
+                  Object pe = Ode.getInstance().getEditorManager().getOpenProjectEditor(destinationProjectId);
+                  if (pe instanceof YaProjectEditor) {
+                    YaProjectEditor projectEditor = (YaProjectEditor) pe;
+                    for (ProjectNode node : resp.getNodes()) {
+                      project.addNode(componentsFolder, node);
+                      if ((node.getName().equals("component.json") ||
+                           node.getName().equals("components.json"))
+                          && countChar(node.getFileId(), '/') == 3) {
+                        projectEditor.importExtension(node);
+                      }
+                    }
+                  }
+                }
+              }
+            } catch (Exception e) {
+              // Best-effort: the .aix IS on disk; worst case reload to
+              // see it in the palette.
+              Ode.CLog("BridgeExports.importExtension post-register failed: " + e.getMessage());
+            }
+            invokeDone(onDone, null, status);
+          }
+          @Override public void onFailure(Throwable t) {
+            invokeDone(onDone, t.getMessage(), null);
+          }
+        });
+  }
 
   /**
    * Restrict the palette to only the listed component types. Pass null
@@ -159,6 +250,13 @@ public final class BridgeExports {
       }
       @Override public void onFailure(Throwable t) { invokeDone(onDone, t.getMessage(), null); }
     });
+  }
+
+  private static int countChar(String s, char ch) {
+    if (s == null) return 0;
+    int n = 0;
+    for (int i = 0; i < s.length(); i++) if (s.charAt(i) == ch) n++;
+    return n;
   }
 
   private static native void invokeDone(com.google.gwt.core.client.JavaScriptObject fn,
