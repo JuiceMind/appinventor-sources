@@ -140,6 +140,16 @@ public class SimplePaletteItem extends DragSourcePanel {
     });
   }
 
+  /**
+   * Programmatic equivalent of dragging this palette item onto the form
+   * canvas. Exposed for the embed-mode bridge (BridgeExports) and any
+   * future internal callers — same code path the dblclick / Enter handlers
+   * use, so behaviour matches a real user gesture exactly.
+   */
+  public void addComponentToActiveForm() {
+    addComponent();
+  }
+
   private void addComponent() {
     MockComponent component = createMockComponent();
     MockVisibleComponent mockVisibleComponent = (MockVisibleComponent) activeEditor.getDropTargetProvider().getDropTargets()[0];

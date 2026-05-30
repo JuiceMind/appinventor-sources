@@ -143,6 +143,16 @@ public abstract class DesignerEditor<S extends SourceNode, T extends MockDesigne
   protected U palettePanel;
   public AbstractPalettePanel.Filter paletteFilter = null;
 
+  /**
+   * Public accessor for the palette panel. Used by the embed-mode bridge
+   * (BridgeExports) to programmatically add components to the form
+   * canvas — replaces the unreliable DOM-scraping path the bridge.js
+   * keyboard simulation used to take.
+   */
+  public U getPalettePanel() {
+    return palettePanel;
+  }
+
   // UI elements
   protected final W visibleComponentsPanel;
   protected final SimpleNonVisibleComponentsPanel<T> nonVisibleComponentsPanel;

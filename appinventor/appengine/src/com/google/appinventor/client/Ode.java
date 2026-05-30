@@ -727,6 +727,11 @@ public class Ode implements EntryPoint {
     // Initialize global Ode instance
     instance = this;
 
+    // Install JSNI helpers used by the embed-mode bridge.js. Safe to call
+    // early — these only attach functions to window and don't touch GWT
+    // state. The bridge waits for user/project init before invoking them.
+    BridgeExports.install();
+
     // Let's see if we were started with a repo= parameter which points to a template
     templatePath = Window.Location.getParameter("repo");
     if (templatePath != null) {

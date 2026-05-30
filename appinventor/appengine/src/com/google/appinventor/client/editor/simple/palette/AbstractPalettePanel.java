@@ -448,6 +448,16 @@ public abstract class AbstractPalettePanel<
     }
   }
 
+  /**
+   * Look up a palette item by component type name. Returns null if no
+   * item is registered for this type (either unknown type, or it was
+   * filtered out by the active palette filter). Used by the embed-mode
+   * bridge to look up the right item before calling addComponentToActiveForm.
+   */
+  public SimplePaletteItem getSimplePaletteItem(String componentTypeName) {
+    return simplePaletteItems.get(componentTypeName);
+  }
+
   protected FlowPanel addComponentCategory(ComponentCategory category) {
     FlowPanel panel = new FlowPanel();
     panel.setWidth("100%");
