@@ -7,8 +7,12 @@ package com.google.appinventor.client;
 
 import com.google.appinventor.client.editor.FileEditor;
 import com.google.appinventor.client.editor.designer.DesignerEditor;
+import com.google.appinventor.client.editor.simple.palette.AbstractPalettePanel;
 import com.google.appinventor.client.editor.simple.palette.SimplePaletteItem;
+import com.google.gwt.core.client.JsArrayString;
 import com.google.gwt.user.client.rpc.AsyncCallback;
+import java.util.HashSet;
+import java.util.Set;
 
 /**
  * JSNI-exported helpers that the embed-mode bridge.js calls directly
@@ -45,7 +49,56 @@ public final class BridgeExports {
     $wnd.aiCopyProject = function (projectId, newName, onDone) {
       @com.google.appinventor.client.BridgeExports::copyProject(Ljava/lang/String;Ljava/lang/String;Lcom/google/gwt/core/client/JavaScriptObject;)(String(projectId), String(newName), onDone || null);
     };
+    $wnd.aiSetPaletteFilter = function (allowedTypesArray, allowExtensions) {
+      var jsArr = allowedTypesArray || null;
+      return @com.google.appinventor.client.BridgeExports::setPaletteFilter(Lcom/google/gwt/core/client/JsArrayString;Z)(jsArr, !!allowExtensions);
+    };
+    $wnd.aiClearPaletteFilter = function () {
+      return @com.google.appinventor.client.BridgeExports::clearPaletteFilter()();
+    };
   }-*/;
+
+  /**
+   * Restrict the palette to only the listed component types. Pass null
+   * or empty to show everything (use clearPaletteFilter to reset).
+   * allowExtensions controls whether the Extensions category shows.
+   * Returns true if the filter was applied, false if no designer is open.
+   */
+  public static boolean setPaletteFilter(JsArrayString allowedTypes, boolean allowExtensions) {
+    AbstractPalettePanel<?, ?> abp = getActivePalette();
+    if (abp == null) return false;
+    final Set<String> allowed = new HashSet<String>();
+    if (allowedTypes != null) {
+      for (int i = 0; i < allowedTypes.length(); i++) {
+        String t = allowedTypes.get(i);
+        if (t != null && !t.isEmpty()) allowed.add(t);
+      }
+    }
+    final boolean ext = allowExtensions;
+    final boolean unrestricted = allowed.isEmpty();
+    abp.setFilter(new AbstractPalettePanel.Filter() {
+      @Override public boolean shouldShowComponent(String componentTypeName) {
+        return unrestricted || allowed.contains(componentTypeName);
+      }
+      @Override public boolean shouldShowExtensions() {
+        return ext;
+      }
+    }, false);
+    return true;
+  }
+
+  /** Remove any custom filter — show every component again. */
+  public static boolean clearPaletteFilter() {
+    return setPaletteFilter(null, true);
+  }
+
+  private static AbstractPalettePanel<?, ?> getActivePalette() {
+    FileEditor fe = Ode.getInstance().getCurrentFileEditor();
+    if (!(fe instanceof DesignerEditor)) return null;
+    DesignerEditor<?, ?, ?, ?, ?> editor = (DesignerEditor<?, ?, ?, ?, ?>) fe;
+    Object panel = editor.getPalettePanel();
+    return panel instanceof AbstractPalettePanel ? (AbstractPalettePanel<?, ?>) panel : null;
+  }
 
   /** Returns true if the component was added, false on any failure. */
   public static boolean addComponent(String componentType) {

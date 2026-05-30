@@ -371,6 +371,17 @@ public abstract class AbstractPalettePanel<
    */
   @Override
   public void addComponent(String componentTypeName) {
+    // Honor the active palette Filter — the interface was declared but
+    // never consulted in the load path, leaving setFilter() effectively
+    // dead. Embed-mode (BridgeExports.setPaletteFilter) relies on this.
+    if (filter != null && !filter.shouldShowComponent(componentTypeName)) {
+      // If we'd previously shown this component, remove it so toggling
+      // the filter on hides items that were already in the palette.
+      if (simplePaletteItems.containsKey(componentTypeName)) {
+        removeComponent(componentTypeName);
+      }
+      return;
+    }
     if (simplePaletteItems.containsKey(componentTypeName)) { // We are upgrading
       removeComponent(componentTypeName);
     }
