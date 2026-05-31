@@ -20,7 +20,6 @@ import com.google.appinventor.shared.rpc.project.youngandroid.YoungAndroidAssetN
 import com.google.appinventor.shared.rpc.project.youngandroid.YoungAndroidAssetsFolder;
 import com.google.appinventor.shared.rpc.project.youngandroid.YoungAndroidComponentsFolder;
 import com.google.appinventor.shared.rpc.project.youngandroid.YoungAndroidProjectNode;
-import com.google.appinventor.shared.rpc.project.ProjectNode;
 import com.google.appinventor.shared.simple.ComponentDatabaseInterface;
 import com.google.gwt.core.client.JavaScriptObject;
 import com.google.gwt.core.client.JsArrayString;
@@ -225,15 +224,15 @@ public final class BridgeExports {
               long destinationProjectId = resp.getProjectId();
               long currentProjectId = Ode.getInstance().getCurrentYoungAndroidProjectId();
               if (currentProjectId == destinationProjectId) {
-                Project project = Ode.getInstance().getProjectManager().getProject(destinationProjectId);
-                if (project != null && project.getRootNode() instanceof YoungAndroidProjectNode) {
+                Project destProject = Ode.getInstance().getProjectManager().getProject(destinationProjectId);
+                if (destProject != null && destProject.getRootNode() instanceof YoungAndroidProjectNode) {
                   YoungAndroidComponentsFolder componentsFolder =
-                      ((YoungAndroidProjectNode) project.getRootNode()).getComponentsFolder();
+                      ((YoungAndroidProjectNode) destProject.getRootNode()).getComponentsFolder();
                   Object pe = Ode.getInstance().getEditorManager().getOpenProjectEditor(destinationProjectId);
                   if (pe instanceof YaProjectEditor) {
                     YaProjectEditor projectEditor = (YaProjectEditor) pe;
                     for (ProjectNode node : resp.getNodes()) {
-                      project.addNode(componentsFolder, node);
+                      destProject.addNode(componentsFolder, node);
                       if ((node.getName().equals("component.json") ||
                            node.getName().equals("components.json"))
                           && countChar(node.getFileId(), '/') == 3) {
@@ -459,13 +458,17 @@ public final class BridgeExports {
         return;
       }
       // getRawFileContent returns the full .scm with the #| $JSON ... |#
-      // wrapper. We rewrite the "$Name":"<old>" to "$Name":"<new>" so
-      // the new form's component tree carries the right root name; AI's
-      // YoungAndroidSourceAnalyzer rejects mismatches.
+      // wrapper. We need to rename the FORM root only — NOT every child
+      // component that happens to share the name. The previous version
+      // did a blind String.replace which would rename child instances
+      // too, breaking blocks that referenced them.
+      //
+      // Strategy: parse out the JSON between the $JSON\n and \n|#
+      // markers, walk the JSON tree, rename only the root "Properties.$Name"
+      // (and the inner "Title" if it matches), then re-wrap. We use the
+      // GWT JSON parser so escapes are handled correctly.
       String rawScm = sourceForm.getRawFileContent();
-      final String sourceScm = rawScm.replace(
-          "\"$Name\":\"" + sourceName + "\"",
-          "\"$Name\":\"" + newName + "\"");
+      final String sourceScm = renameFormInScm(rawScm, sourceName, newName);
       final String sourceBky = sourceBlocks != null ? sourceBlocks.getRawFileContent() : "";
       // Defer the rest: AI's screen creation is async. We delegate to the
       // YaProjectEditor.addScreen pattern, then write our captured content
@@ -505,7 +508,11 @@ public final class BridgeExports {
     final String wrappedScm = capturedScm;
     final String effectiveBky = capturedBky != null && !capturedBky.trim().isEmpty()
         ? capturedBky
-        : "<xml xmlns=\"https://developers.google.com/blockly/xml\"><yacodeblocks ya-version=\"233\" language-version=\"38\"/></xml>";
+        : "<xml xmlns=\"https://developers.google.com/blockly/xml\"><yacodeblocks ya-version=\""
+          + com.google.appinventor.components.common.YaVersion.YOUNG_ANDROID_VERSION
+          + "\" language-version=\""
+          + com.google.appinventor.components.common.YaVersion.BLOCKS_LANGUAGE_VERSION
+          + "\"/></xml>";
 
     // Two-step: addFile creates the empty .scm/.bky on the server so a
     // node exists; then save() writes the captured content into them.
@@ -529,9 +536,40 @@ public final class BridgeExports {
         Ode.getInstance().getProjectService().save(Ode.getInstance().getSessionId(), files,
             new AsyncCallback<Long>() {
           @Override public void onSuccess(Long ts2) {
-            // Files exist on disk with content. AI's open-editors list
-            // won't refresh until the project is re-opened; embedders
-            // should reload to surface the new screen in the dropdown.
+            // Register the new screen's nodes in the in-memory project
+            // tree (mirrors what registerAsset does for assets, and what
+            // AddFormCommand does for user-created screens). Without
+            // this, the screens dropdown only updates on the next iframe
+            // reload — making copyScreen look broken from the caller's
+            // perspective.
+            try {
+              long pid = Ode.getInstance().getCurrentYoungAndroidProjectId();
+              Project proj = Ode.getInstance().getProjectManager().getProject(pid);
+              if (proj != null && proj.getRootNode() instanceof YoungAndroidProjectNode) {
+                YoungAndroidProjectNode root = (YoungAndroidProjectNode) proj.getRootNode();
+                // Find the source folder by walking the tree once.
+                com.google.appinventor.shared.rpc.project.youngandroid.YoungAndroidPackageNode pkgNode = null;
+                java.util.Deque<ProjectNode> stack = new java.util.ArrayDeque<ProjectNode>();
+                stack.push(root);
+                while (!stack.isEmpty()) {
+                  ProjectNode n = stack.pop();
+                  if (n instanceof com.google.appinventor.shared.rpc.project.youngandroid.YoungAndroidPackageNode) {
+                    pkgNode = (com.google.appinventor.shared.rpc.project.youngandroid.YoungAndroidPackageNode) n;
+                    break;
+                  }
+                  for (ProjectNode c : n.getChildren()) stack.push(c);
+                }
+                if (pkgNode != null) {
+                  proj.addNode(pkgNode,
+                      new com.google.appinventor.shared.rpc.project.youngandroid.YoungAndroidFormNode(newScmId));
+                  proj.addNode(pkgNode,
+                      new com.google.appinventor.shared.rpc.project.youngandroid.YoungAndroidBlocksNode(newBkyId));
+                }
+              }
+            } catch (Exception e) {
+              // The files ARE on disk; embedder can reload to see them.
+              Ode.CLog("copyScreen: post-create node registration failed: " + e.getMessage());
+            }
             invokeDone(onDone, null, newName);
           }
           @Override public void onFailure(Throwable t) {
@@ -577,6 +615,57 @@ public final class BridgeExports {
     } catch (Exception e) {
       Ode.CLog("BridgeExports.registerAsset failed for " + filename + ": " + e.getMessage());
       return false;
+    }
+  }
+
+  /**
+   * Rename ONLY the form root inside a .scm source string.
+   * The .scm payload is the JSON between `#|\n$JSON\n` and `\n|#`. We
+   * parse it with GWT's JSON library, rewrite the top-level
+   * `Properties.$Name` (and `Properties.Title` if it equals the old name,
+   * matching what AddFormCommand does), and re-emit. Child components
+   * named the same as the screen are NOT touched.
+   */
+  private static String renameFormInScm(String rawScm, String oldName, String newName) {
+    if (rawScm == null) return rawScm;
+    int begin = rawScm.indexOf("$JSON");
+    int end = rawScm.lastIndexOf("|#");
+    if (begin < 0 || end < 0) return rawScm;
+    int jsonStart = rawScm.indexOf('\n', begin);
+    if (jsonStart < 0) return rawScm;
+    String prefix = rawScm.substring(0, jsonStart + 1);
+    String suffix = rawScm.substring(end);
+    String jsonPart = rawScm.substring(jsonStart + 1, end).trim();
+    try {
+      com.google.gwt.json.client.JSONValue root =
+          com.google.gwt.json.client.JSONParser.parseStrict(jsonPart);
+      com.google.gwt.json.client.JSONObject obj = root.isObject();
+      if (obj == null) return rawScm;
+      com.google.gwt.json.client.JSONValue propsV = obj.get("Properties");
+      com.google.gwt.json.client.JSONObject props = propsV == null ? null : propsV.isObject();
+      if (props == null) return rawScm;
+      com.google.gwt.json.client.JSONValue nameV = props.get("$Name");
+      if (nameV != null && nameV.isString() != null
+          && oldName.equals(nameV.isString().stringValue())) {
+        props.put("$Name", new com.google.gwt.json.client.JSONString(newName));
+      }
+      com.google.gwt.json.client.JSONValue titleV = props.get("Title");
+      if (titleV != null && titleV.isString() != null
+          && oldName.equals(titleV.isString().stringValue())) {
+        props.put("Title", new com.google.gwt.json.client.JSONString(newName));
+      }
+      return prefix + obj.toString() + "\n" + suffix;
+    } catch (Exception e) {
+      // GWT doesn't have java.util.regex. If the JSON parse failed,
+      // fall back to a single-occurrence string replace on the first
+      // "$Name":"<old>" — the .scm always has the form root as the
+      // first occurrence (encodeComponentProperties walks parent before
+      // children), so this is correct for well-formed AI source.
+      String needle = "\"$Name\":\"" + oldName + "\"";
+      int idx = rawScm.indexOf(needle);
+      if (idx < 0) return rawScm;
+      String replacement = "\"$Name\":\"" + newName + "\"";
+      return rawScm.substring(0, idx) + replacement + rawScm.substring(idx + needle.length());
     }
   }
 
