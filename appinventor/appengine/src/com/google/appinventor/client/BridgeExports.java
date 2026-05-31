@@ -6,10 +6,13 @@
 package com.google.appinventor.client;
 
 import com.google.appinventor.client.editor.FileEditor;
+import com.google.appinventor.client.editor.ProjectEditor;
 import com.google.appinventor.client.editor.designer.DesignerEditor;
 import com.google.appinventor.client.editor.simple.palette.AbstractPalettePanel;
 import com.google.appinventor.client.editor.simple.palette.SimplePaletteItem;
+import com.google.appinventor.client.editor.youngandroid.YaBlocksEditor;
 import com.google.appinventor.client.editor.youngandroid.YaProjectEditor;
+import com.google.appinventor.shared.rpc.project.FileDescriptorWithContent;
 import com.google.appinventor.client.explorer.project.Project;
 import com.google.appinventor.shared.rpc.component.ComponentImportResponse;
 import com.google.appinventor.shared.rpc.project.ProjectNode;
@@ -71,6 +74,50 @@ public final class BridgeExports {
     $wnd.aiGetComponentInfo = function (type) {
       return @com.google.appinventor.client.BridgeExports::getComponentInfo(Ljava/lang/String;)(String(type));
     };
+    $wnd.aiGetYail = function () {
+      return @com.google.appinventor.client.BridgeExports::getYail()();
+    };
+  }-*/;
+
+  /**
+   * Generate Yail (Scheme source) for every Blocks editor in the current
+   * project. Returns a JS object keyed by file name (e.g. "Screen1.yail")
+   * with the generated source as the value. Useful for compile-only flows
+   * that want to inspect what the build server will see without firing
+   * a full APK build.
+   *
+   * Returns null if no project is open.
+   */
+  public static JavaScriptObject getYail() {
+    long projectId = Ode.getInstance().getCurrentYoungAndroidProjectId();
+    if (projectId == 0) return null;
+    Object pe = Ode.getInstance().getEditorManager().getOpenProjectEditor(projectId);
+    if (!(pe instanceof ProjectEditor)) return null;
+    ProjectEditor projectEditor = (ProjectEditor) pe;
+    JavaScriptObject result = createObject();
+    for (FileEditor fe : projectEditor.getOpenFileEditors()) {
+      if (fe instanceof YaBlocksEditor) {
+        try {
+          FileDescriptorWithContent fd = ((YaBlocksEditor) fe).getYail();
+          // fd.getFileId() is a project-relative path; take the basename
+          // so callers get { "Screen1.yail": "..." } not nested paths.
+          String fileId = fd.getFileId();
+          int slash = fileId.lastIndexOf('/');
+          String key = slash >= 0 ? fileId.substring(slash + 1) : fileId;
+          setObjectProperty(result, key, fd.getContent());
+        } catch (Exception e) {
+          // Blocks with errors throw BlocksCodeGenerationException; emit
+          // an `error` entry so the caller knows the screen failed.
+          setObjectProperty(result, "__error_" + fe.getFileId(), e.getMessage());
+        }
+      }
+    }
+    return result;
+  }
+
+  private static native JavaScriptObject createObject() /*-{ return {}; }-*/;
+  private static native void setObjectProperty(JavaScriptObject obj, String key, String value) /*-{
+    obj[key] = value;
   }-*/;
 
   /**
