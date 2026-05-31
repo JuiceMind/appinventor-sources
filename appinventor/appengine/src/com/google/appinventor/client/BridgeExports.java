@@ -16,9 +16,11 @@ import com.google.appinventor.shared.rpc.project.FileDescriptorWithContent;
 import com.google.appinventor.client.explorer.project.Project;
 import com.google.appinventor.shared.rpc.component.ComponentImportResponse;
 import com.google.appinventor.shared.rpc.project.ProjectNode;
+import com.google.appinventor.shared.rpc.project.youngandroid.YoungAndroidAssetNode;
 import com.google.appinventor.shared.rpc.project.youngandroid.YoungAndroidAssetsFolder;
 import com.google.appinventor.shared.rpc.project.youngandroid.YoungAndroidComponentsFolder;
 import com.google.appinventor.shared.rpc.project.youngandroid.YoungAndroidProjectNode;
+import com.google.appinventor.shared.rpc.project.ProjectNode;
 import com.google.appinventor.shared.simple.ComponentDatabaseInterface;
 import com.google.gwt.core.client.JavaScriptObject;
 import com.google.gwt.core.client.JsArrayString;
@@ -69,6 +71,9 @@ public final class BridgeExports {
     };
     $wnd.aiCopyScreen = function (sourceName, newName, onDone) {
       @com.google.appinventor.client.BridgeExports::copyScreen(Ljava/lang/String;Ljava/lang/String;Lcom/google/gwt/core/client/JavaScriptObject;)(String(sourceName), String(newName), onDone || null);
+    };
+    $wnd.aiRegisterAsset = function (filename) {
+      return @com.google.appinventor.client.BridgeExports::registerAsset(Ljava/lang/String;)(String(filename));
     };
     $wnd.aiSetPaletteFilter = function (allowedTypesArray, allowExtensions) {
       var jsArr = allowedTypesArray || null;
@@ -538,6 +543,41 @@ public final class BridgeExports {
         invokeDone(onDone, "addFile .scm: " + t.getMessage(), null);
       }
     });
+  }
+
+  /**
+   * Register an asset that was just uploaded via raw HTTP POST so AI's
+   * in-memory project tree picks it up. Without this, listAssets and
+   * deleteAsset (which both walk YoungAndroidAssetsFolder.getChildren)
+   * would skip the new file until the project is reloaded.
+   *
+   * Idempotent — if a node with the same fileId already exists, no-op.
+   * Mirrors what FileUploadWizard.finishUpload does after a UI upload.
+   */
+  public static boolean registerAsset(String filename) {
+    if (filename == null || filename.isEmpty()) return false;
+    try {
+      long projectId = Ode.getInstance().getCurrentYoungAndroidProjectId();
+      if (projectId == 0) return false;
+      Project project = Ode.getInstance().getProjectManager().getProject(projectId);
+      if (project == null || !(project.getRootNode() instanceof YoungAndroidProjectNode)) {
+        return false;
+      }
+      YoungAndroidAssetsFolder assetsFolder =
+          ((YoungAndroidProjectNode) project.getRootNode()).getAssetsFolder();
+      if (assetsFolder == null) return false;
+      // Skip if already registered.
+      for (ProjectNode existing : assetsFolder.getChildren()) {
+        if (filename.equals(existing.getName())) return true;
+      }
+      String fileId = assetsFolder.getFileId() + "/" + filename;
+      YoungAndroidAssetNode node = new YoungAndroidAssetNode(filename, fileId);
+      project.addNode(assetsFolder, node);
+      return true;
+    } catch (Exception e) {
+      Ode.CLog("BridgeExports.registerAsset failed for " + filename + ": " + e.getMessage());
+      return false;
+    }
   }
 
   private static int countChar(String s, char ch) {
