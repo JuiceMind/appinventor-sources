@@ -61,6 +61,15 @@ public final class BridgeExports {
     $wnd.aiCopyProject = function (projectId, newName, onDone) {
       @com.google.appinventor.client.BridgeExports::copyProject(Ljava/lang/String;Ljava/lang/String;Lcom/google/gwt/core/client/JavaScriptObject;)(String(projectId), String(newName), onDone || null);
     };
+    $wnd.aiMoveProjectToTrash = function (projectId, onDone) {
+      @com.google.appinventor.client.BridgeExports::moveProjectToTrash(Ljava/lang/String;Lcom/google/gwt/core/client/JavaScriptObject;)(String(projectId), onDone || null);
+    };
+    $wnd.aiRestoreProject = function (projectId, onDone) {
+      @com.google.appinventor.client.BridgeExports::restoreProject(Ljava/lang/String;Lcom/google/gwt/core/client/JavaScriptObject;)(String(projectId), onDone || null);
+    };
+    $wnd.aiCopyScreen = function (sourceName, newName, onDone) {
+      @com.google.appinventor.client.BridgeExports::copyScreen(Ljava/lang/String;Ljava/lang/String;Lcom/google/gwt/core/client/JavaScriptObject;)(String(sourceName), String(newName), onDone || null);
+    };
     $wnd.aiSetPaletteFilter = function (allowedTypesArray, allowExtensions) {
       var jsArr = allowedTypesArray || null;
       return @com.google.appinventor.client.BridgeExports::setPaletteFilter(Lcom/google/gwt/core/client/JsArrayString;Z)(jsArr, !!allowExtensions);
@@ -342,6 +351,192 @@ public final class BridgeExports {
         invokeDone(onDone, null, String.valueOf(p.getProjectId()));
       }
       @Override public void onFailure(Throwable t) { invokeDone(onDone, t.getMessage(), null); }
+    });
+  }
+
+  /**
+   * Soft-delete: moves a project into the user's trash. Recoverable via
+   * restoreProject. Use deleteProject for a hard delete.
+   */
+  public static void moveProjectToTrash(String projectIdStr, final com.google.gwt.core.client.JavaScriptObject onDone) {
+    final long projectId;
+    try {
+      projectId = Long.parseLong(projectIdStr);
+    } catch (NumberFormatException e) {
+      invokeDone(onDone, "Invalid projectId: " + projectIdStr, null);
+      return;
+    }
+    Ode.getInstance().getProjectService().moveToTrash(projectId,
+        new AsyncCallback<com.google.appinventor.shared.rpc.project.UserProject>() {
+      @Override public void onSuccess(com.google.appinventor.shared.rpc.project.UserProject p) {
+        invokeDone(onDone, null, String.valueOf(p.getProjectId()));
+      }
+      @Override public void onFailure(Throwable t) { invokeDone(onDone, t.getMessage(), null); }
+    });
+  }
+
+  /** Restore a previously-trashed project. */
+  public static void restoreProject(String projectIdStr, final com.google.gwt.core.client.JavaScriptObject onDone) {
+    final long projectId;
+    try {
+      projectId = Long.parseLong(projectIdStr);
+    } catch (NumberFormatException e) {
+      invokeDone(onDone, "Invalid projectId: " + projectIdStr, null);
+      return;
+    }
+    Ode.getInstance().getProjectService().restoreProject(projectId,
+        new AsyncCallback<com.google.appinventor.shared.rpc.project.UserProject>() {
+      @Override public void onSuccess(com.google.appinventor.shared.rpc.project.UserProject p) {
+        invokeDone(onDone, null, String.valueOf(p.getProjectId()));
+      }
+      @Override public void onFailure(Throwable t) { invokeDone(onDone, t.getMessage(), null); }
+    });
+  }
+
+  /**
+   * Duplicate a screen WITHIN the current project. Reads the source
+   * screen's serialised form JSON + blocks XML, creates a new screen
+   * with newName, and writes the captured content into it.
+   *
+   * Embedders can layer rename on top of this: copyScreen(old, new) +
+   * removeScreen(old). AI itself has no native rename — file paths are
+   * tied to screen names so renaming would require renaming both the
+   * .scm and .bky files at the server.
+   *
+   * Reorder is intentionally NOT exposed: AI sorts the screens dropdown
+   * by file path (which embeds creation timestamp), so re-ordering would
+   * require a full per-screen copy + delete cycle that loses session
+   * state. Not worth the complexity for a cosmetic ordering change.
+   *
+   * Callback: invokeDone(null, "<newScreenName>") on success.
+   */
+  public static void copyScreen(String sourceName, String newName, final com.google.gwt.core.client.JavaScriptObject onDone) {
+    if (sourceName == null || sourceName.isEmpty() || newName == null || newName.isEmpty()) {
+      invokeDone(onDone, "sourceName and newName required", null);
+      return;
+    }
+    if (sourceName.equals(newName)) {
+      invokeDone(onDone, "newName must differ from sourceName", null);
+      return;
+    }
+    try {
+      long projectId = Ode.getInstance().getCurrentYoungAndroidProjectId();
+      if (projectId == 0) {
+        invokeDone(onDone, "No project open", null);
+        return;
+      }
+      // Find the source FormEditor inside the active project so we can
+      // serialise its SCM + read its blocks XML.
+      Object pe = Ode.getInstance().getEditorManager().getOpenProjectEditor(projectId);
+      if (!(pe instanceof YaProjectEditor)) {
+        invokeDone(onDone, "Active project is not Young Android", null);
+        return;
+      }
+      YaProjectEditor projectEditor = (YaProjectEditor) pe;
+      com.google.appinventor.client.editor.youngandroid.YaFormEditor sourceForm = null;
+      com.google.appinventor.client.editor.youngandroid.YaBlocksEditor sourceBlocks = null;
+      for (com.google.appinventor.client.editor.FileEditor fe : projectEditor.getOpenFileEditors()) {
+        String fid = fe.getFileId();
+        if (fid == null) continue;
+        // FileIds look like .../<screenName>.scm or .../<screenName>.bky
+        int slash = fid.lastIndexOf('/');
+        String base = slash >= 0 ? fid.substring(slash + 1) : fid;
+        if (base.equals(sourceName + ".scm")
+            && fe instanceof com.google.appinventor.client.editor.youngandroid.YaFormEditor) {
+          sourceForm = (com.google.appinventor.client.editor.youngandroid.YaFormEditor) fe;
+        } else if (base.equals(sourceName + ".bky")
+            && fe instanceof com.google.appinventor.client.editor.youngandroid.YaBlocksEditor) {
+          sourceBlocks = (com.google.appinventor.client.editor.youngandroid.YaBlocksEditor) fe;
+        }
+      }
+      if (sourceForm == null) {
+        invokeDone(onDone, "Source screen '" + sourceName + "' not found", null);
+        return;
+      }
+      // getRawFileContent returns the full .scm with the #| $JSON ... |#
+      // wrapper. We rewrite the "$Name":"<old>" to "$Name":"<new>" so
+      // the new form's component tree carries the right root name; AI's
+      // YoungAndroidSourceAnalyzer rejects mismatches.
+      String rawScm = sourceForm.getRawFileContent();
+      final String sourceScm = rawScm.replace(
+          "\"$Name\":\"" + sourceName + "\"",
+          "\"$Name\":\"" + newName + "\"");
+      final String sourceBky = sourceBlocks != null ? sourceBlocks.getRawFileContent() : "";
+      // Defer the rest: AI's screen creation is async. We delegate to the
+      // YaProjectEditor.addScreen pattern, then write our captured content
+      // into the new screen once it appears in the open-editors list.
+      copyScreenAfterCreate(projectEditor, sourceName, newName, sourceScm, sourceBky, onDone);
+    } catch (Exception e) {
+      invokeDone(onDone, "copyScreen: " + e.getMessage(), null);
+    }
+  }
+
+  private static void copyScreenAfterCreate(
+      final YaProjectEditor projectEditor,
+      final String sourceName, final String newName,
+      final String capturedScm, final String capturedBky,
+      final com.google.gwt.core.client.JavaScriptObject onDone) {
+    // Re-purpose AI's "Add Screen" flow at the data level: write the new
+    // screen's two source files directly via the file service, then ask
+    // YaProjectEditor to refresh. This mirrors what AddFormCommand does
+    // after the user types a name, without the UI dialog dance.
+    long projectId = Ode.getInstance().getCurrentYoungAndroidProjectId();
+    // Compose new screen's fileIds from a reference source path so we
+    // inherit the project's package directory.
+    String refFileId = null;
+    for (com.google.appinventor.client.editor.FileEditor fe : projectEditor.getOpenFileEditors()) {
+      String fid = fe.getFileId();
+      if (fid != null && fid.endsWith("/" + sourceName + ".scm")) { refFileId = fid; break; }
+    }
+    if (refFileId == null) {
+      invokeDone(onDone, "Could not derive new screen path from source", null);
+      return;
+    }
+    String prefix = refFileId.substring(0, refFileId.length() - (sourceName + ".scm").length());
+    final String newScmId = prefix + newName + ".scm";
+    final String newBkyId = prefix + newName + ".bky";
+    // capturedScm is already the full .scm document (includes the $JSON
+    // wrapper) — getRawFileContent returns the wire format.
+    final String wrappedScm = capturedScm;
+    final String effectiveBky = capturedBky != null && !capturedBky.trim().isEmpty()
+        ? capturedBky
+        : "<xml xmlns=\"https://developers.google.com/blockly/xml\"><yacodeblocks ya-version=\"233\" language-version=\"38\"/></xml>";
+
+    // Two-step: addFile creates the empty .scm/.bky on the server so a
+    // node exists; then save() writes the captured content into them.
+    // addFile on a path that already exists is rejected, so we sequence
+    // the calls and surface the first failure.
+    final com.google.appinventor.shared.rpc.project.FileDescriptorWithContent scmFile =
+        new com.google.appinventor.shared.rpc.project.FileDescriptorWithContent(projectId, newScmId, wrappedScm);
+    final com.google.appinventor.shared.rpc.project.FileDescriptorWithContent bkyFile =
+        new com.google.appinventor.shared.rpc.project.FileDescriptorWithContent(projectId, newBkyId, effectiveBky);
+
+    // AI's addFile creates the .scm AND auto-spawns the matching empty
+    // .bky on the server (matches what AddFormCommand does). We then
+    // save both files in one batch to overwrite the defaults with the
+    // captured content from the source screen.
+    Ode.getInstance().getProjectService().addFile(projectId, newScmId, new AsyncCallback<Long>() {
+      @Override public void onSuccess(Long ts1) {
+        java.util.List<com.google.appinventor.shared.rpc.project.FileDescriptorWithContent> files =
+            new java.util.ArrayList<com.google.appinventor.shared.rpc.project.FileDescriptorWithContent>();
+        files.add(scmFile);
+        files.add(bkyFile);
+        Ode.getInstance().getProjectService().save(Ode.getInstance().getSessionId(), files,
+            new AsyncCallback<Long>() {
+          @Override public void onSuccess(Long ts2) {
+            // Files exist on disk with content. AI's open-editors list
+            // won't refresh until the project is re-opened; embedders
+            // should reload to surface the new screen in the dropdown.
+            invokeDone(onDone, null, newName);
+          }
+          @Override public void onFailure(Throwable t) {
+            invokeDone(onDone, "save content: " + t.getMessage(), null);
+          }
+        });
+      }
+      @Override public void onFailure(Throwable t) {
+        invokeDone(onDone, "addFile .scm: " + t.getMessage(), null);
+      }
     });
   }
 
