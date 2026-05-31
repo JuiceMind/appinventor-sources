@@ -301,6 +301,54 @@ public final class ComponentEditor {
     }
   }
 
+  /**
+   * Move a component to a new parent container (and optional visible
+   * index). Returns true if the move succeeded.
+   *
+   * - componentName: instance name of the source component
+   * - newParentName: instance name of the destination container, or
+   *   "Screen1" to move to the form root
+   * - beforeIndex: visible-index in the new parent to insert before;
+   *   -1 appends. Indices reference shown-only children, matching
+   *   MockContainer.addVisibleComponent's contract.
+   *
+   * Mirrors what AI's drag-and-drop reorder does: detach via
+   * source-container.removeComponent(component, false) then re-attach
+   * via target.addVisibleComponent(...).
+   */
+  public static boolean moveComponent(String componentName, String newParentName, int beforeIndex) {
+    try {
+      MockComponent component = findComponent(componentName);
+      if (component == null || component.isRoot()) return false;
+      MockComponent newParent = findComponent(newParentName);
+      if (!(newParent instanceof com.google.appinventor.client.editor.simple.components.MockContainer)) {
+        return false;
+      }
+      com.google.appinventor.client.editor.simple.components.MockContainer target =
+          (com.google.appinventor.client.editor.simple.components.MockContainer) newParent;
+      if (!target.willAcceptComponentType(component.getType())) return false;
+      com.google.appinventor.client.editor.simple.components.MockContainer source = component.getContainer();
+      if (source == null) return false;
+      // No-op if already at the same position to avoid pointless writes.
+      if (source == target) {
+        java.util.List<com.google.appinventor.client.editor.simple.components.MockComponent> visible =
+            target.getShowingVisibleChildren();
+        int currentIdx = visible.indexOf(component);
+        if (currentIdx == beforeIndex ||
+            (beforeIndex == -1 && currentIdx == visible.size() - 1)) {
+          return true;
+        }
+      }
+      source.removeComponent(component, false);
+      target.addVisibleComponent(component, beforeIndex);
+      // Mark the form dirty so saving picks up the structural change.
+      target.getForm().select(null);
+      return true;
+    } catch (Exception e) {
+      return false;
+    }
+  }
+
   // ─── Internal helpers ─────────────────────────────────────────────────
 
   private static YoungAndroidAssetsFolder getAssetsFolder() {
@@ -340,5 +388,7 @@ public final class ComponentEditor {
       $entry(@com.google.appinventor.client.ComponentEditor::getBlocksXml());
     $wnd.ComponentEditor_deleteAsset =
       $entry(@com.google.appinventor.client.ComponentEditor::deleteAsset(Ljava/lang/String;));
+    $wnd.ComponentEditor_moveComponent =
+      $entry(@com.google.appinventor.client.ComponentEditor::moveComponent(Ljava/lang/String;Ljava/lang/String;I));
   }-*/;
 }
