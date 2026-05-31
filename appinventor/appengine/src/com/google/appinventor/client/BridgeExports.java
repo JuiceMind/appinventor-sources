@@ -16,6 +16,8 @@ import com.google.appinventor.shared.rpc.project.ProjectNode;
 import com.google.appinventor.shared.rpc.project.youngandroid.YoungAndroidAssetsFolder;
 import com.google.appinventor.shared.rpc.project.youngandroid.YoungAndroidComponentsFolder;
 import com.google.appinventor.shared.rpc.project.youngandroid.YoungAndroidProjectNode;
+import com.google.appinventor.shared.simple.ComponentDatabaseInterface;
+import com.google.gwt.core.client.JavaScriptObject;
 import com.google.gwt.core.client.JsArrayString;
 import com.google.gwt.user.client.rpc.AsyncCallback;
 import java.util.HashSet;
@@ -65,6 +67,50 @@ public final class BridgeExports {
     };
     $wnd.aiImportExtension = function (uploadInfo, onDone) {
       @com.google.appinventor.client.BridgeExports::importExtension(Ljava/lang/String;Lcom/google/gwt/core/client/JavaScriptObject;)(String(uploadInfo), onDone || null);
+    };
+    $wnd.aiGetComponentInfo = function (type) {
+      return @com.google.appinventor.client.BridgeExports::getComponentInfo(Ljava/lang/String;)(String(type));
+    };
+  }-*/;
+
+  /**
+   * Look up palette + documentation metadata for a single component type.
+   * Returns a plain JS object with the fields the embedder needs to render
+   * a help drawer / tooltip without round-tripping to the component DB.
+   * Returns null if the type is unknown.
+   */
+  public static JavaScriptObject getComponentInfo(String componentType) {
+    if (componentType == null || componentType.isEmpty()) return null;
+    FileEditor fe = Ode.getInstance().getCurrentFileEditor();
+    if (!(fe instanceof DesignerEditor)) return null;
+    DesignerEditor<?, ?, ?, ?, ?> editor = (DesignerEditor<?, ?, ?, ?, ?>) fe;
+    Object dbObj = editor.getComponentDatabase();
+    if (!(dbObj instanceof ComponentDatabaseInterface)) return null;
+    ComponentDatabaseInterface db = (ComponentDatabaseInterface) dbObj;
+    try {
+      String help = db.getHelpString(componentType);
+      String helpUrl = db.getHelpUrl(componentType);
+      String category = db.getCategoryString(componentType);
+      String catDocUrl = db.getCategoryDocUrlString(componentType);
+      String version = String.valueOf(db.getComponentVersion(componentType));
+      String versionName = db.getComponentVersionName(componentType);
+      boolean nonVisible = db.getNonVisible(componentType);
+      boolean external = db.getComponentExternal(componentType);
+      return buildInfoJs(componentType, help, helpUrl, category, catDocUrl,
+                         version, versionName, nonVisible, external);
+    } catch (Exception e) {
+      Ode.CLog("BridgeExports.getComponentInfo failed for " + componentType + ": " + e.getMessage());
+      return null;
+    }
+  }
+
+  private static native JavaScriptObject buildInfoJs(
+      String type, String help, String helpUrl, String category, String categoryDocUrl,
+      String version, String versionName, boolean nonVisible, boolean external) /*-{
+    return {
+      type: type, help: help, helpUrl: helpUrl, category: category,
+      categoryDocUrl: categoryDocUrl, version: version, versionName: versionName,
+      nonVisible: nonVisible, external: external,
     };
   }-*/;
 
