@@ -276,6 +276,15 @@ public class ProjectList extends Composite implements FolderManagerEventListener
 
   public void refresh(boolean needToSort) {
     LOG.info("Refresh ProjectList");
+    // Embed mode (single-project editor) never initializes the project-list
+    // folder, yet the ODE still routes through switchToProjectsView on load.
+    // folder is null there, so folder.getProjects() throws an uncaught NPE
+    // that derails GWT startup — the designer never renders and the bridge
+    // hits its 45s "project did not appear" timeout ("Failed to load project").
+    if (folder == null) {
+      LOG.warning("ProjectList.refresh: folder is null (embed mode / not initialized); skipping");
+      return;
+    }
     List<Project> projects = folder.getProjects();
     refreshSortIndicators();
 
