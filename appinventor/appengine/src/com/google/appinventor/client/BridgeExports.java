@@ -7,6 +7,9 @@ package com.google.appinventor.client;
 
 import com.google.appinventor.client.editor.FileEditor;
 import com.google.appinventor.client.editor.ProjectEditor;
+import com.google.appinventor.client.jzip.GenerateOptions;
+import com.google.appinventor.client.jzip.JSZip;
+import com.google.appinventor.client.jzip.Type;
 import com.google.appinventor.client.editor.designer.DesignerEditor;
 import com.google.appinventor.client.editor.simple.palette.AbstractPalettePanel;
 import com.google.appinventor.client.editor.simple.palette.SimplePaletteItem;
@@ -90,7 +93,118 @@ public final class BridgeExports {
     $wnd.aiGetYail = function () {
       return @com.google.appinventor.client.BridgeExports::getYail()();
     };
+    $wnd.aiExportAia = function (onDone) {
+      @com.google.appinventor.client.BridgeExports::exportAia(Lcom/google/gwt/core/client/JavaScriptObject;)(onDone || null);
+    };
   }-*/;
+
+  /**
+   * Build a .aia (base64) from the live in-memory project state — no server
+   * round-trip, no dependence on GWT autosave having flushed. Walks every
+   * open FileEditor, reads getRawFileContent(), synthesises a project.properties
+   * from the open Project, zips, and resolves the callback with the base64.
+   *
+   * Why client-side: AI's Designer in the embed flow doesn't auto-POST saves
+   * to /ode/* — fetching /ode/download/project-source returns the .aia as it
+   * was at upload time, missing every live edit. Reading from EditorManager
+   * always sees the current edit, scales to thousands of concurrent users
+   * (zero server hits per change), and removes the save-race entirely.
+   *
+   * Limitation: assets are NOT re-included. The on-disk .aia AI already has
+   * holds assets that the editor has never re-fetched as bytes; round-tripping
+   * them would require a /ode/download per asset on every export. For lessons
+   * that don't add assets in-session this is correct. If asset persistence
+   * becomes required, fetch them lazily once on first export and cache.
+   *
+   * Callback: invokeDone(null, aiaBase64) on success, invokeDone(err, null) on failure.
+   */
+  public static void exportAia(final com.google.gwt.core.client.JavaScriptObject onDone) {
+    try {
+      long projectId = Ode.getInstance().getCurrentYoungAndroidProjectId();
+      if (projectId == 0) {
+        invokeDone(onDone, "No project open", null);
+        return;
+      }
+      Project project = Ode.getInstance().getProjectManager().getProject(projectId);
+      Object pe = Ode.getInstance().getEditorManager().getOpenProjectEditor(projectId);
+      if (!(pe instanceof ProjectEditor)) {
+        invokeDone(onDone, "No project editor", null);
+        return;
+      }
+      ProjectEditor projectEditor = (ProjectEditor) pe;
+
+      JSZip zip = new JSZip();
+      String mainFqName = null;
+      int fileCount = 0;
+      for (FileEditor fe : projectEditor.getOpenFileEditors()) {
+        String fid = fe.getFileId();
+        if (fid == null || fid.isEmpty()) continue;
+        String raw;
+        try {
+          raw = fe.getRawFileContent();
+        } catch (Exception e) {
+          Ode.CLog("exportAia: getRawFileContent failed for " + fid + ": " + e.getMessage());
+          continue;
+        }
+        if (raw == null) raw = "";
+        zip.putFile(fid, raw);
+        fileCount++;
+        // Pick the first Screen1.scm as the main form. Path looks like
+        // "src/<package-with-slashes>/Screen1.scm" → "<package>.Screen1".
+        if (mainFqName == null && fid.startsWith("src/") && fid.endsWith("/Screen1.scm")) {
+          String body = fid.substring(4, fid.length() - 4); // strip "src/" and ".scm"
+          mainFqName = body.replace('/', '.');
+        }
+      }
+
+      String projectName = project != null ? project.getProjectName() : "Project";
+      if (mainFqName == null) {
+        mainFqName = "appinventor.ai_user." + projectName + ".Screen1";
+      }
+
+      // Synthesised project.properties. Mirrors the template used by
+      // LocalProjectService when creating a new project. We don't read the
+      // on-disk project.properties because (a) we'd need a server fetch and
+      // (b) the editor doesn't open it as a FileEditor — its fields are not
+      // user-editable mid-session, so synthesising is correct.
+      String props =
+          "sizing=Responsive\n"
+        + "color.primary.dark=&HFF303F9F\n"
+        + "color.primary=&HFF3F51B5\n"
+        + "color.accent=&HFFFF4081\n"
+        + "aname=" + projectName + "\n"
+        + "defaultfilescope=App\n"
+        + "main=" + mainFqName + "\n"
+        + "source=../src\n"
+        + "actionbar=True\n"
+        + "useslocation=False\n"
+        + "assets=../assets\n"
+        + "build=../build\n"
+        + "name=" + projectName + "\n"
+        + "showlistsasjson=True\n"
+        + "theme=AppTheme.Light.DarkActionBar\n"
+        + "versioncode=1\n"
+        + "versionname=1.0\n";
+      zip.putFile("youngandroidproject/project.properties", props);
+
+      if (fileCount == 0) {
+        invokeDone(onDone, "exportAia: no editable files open", null);
+        return;
+      }
+
+      zip.<String>generateAsync(GenerateOptions.create(Type.BASE64))
+          .then(base64 -> {
+            invokeDone(onDone, null, base64);
+            return null;
+          })
+          .error(t -> {
+            invokeDone(onDone, "zip failed: " + (t == null ? "unknown" : t.getMessage()), null);
+            return null;
+          });
+    } catch (Exception e) {
+      invokeDone(onDone, "exportAia: " + e.getMessage(), null);
+    }
+  }
 
   /**
    * Generate Yail (Scheme source) for every Blocks editor in the current
